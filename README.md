@@ -217,6 +217,11 @@ uv run mypy hermes/
 - FRED requires a free API key from [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html)
 - LibreOffice for PDF export (optional, available in Docker image)
 
+## Professional Services
+
+Need this deployed internally, integrated with your data sources, or extended
+with custom agents and models? [joe@pital.dev](mailto:joe@pital.dev)
+
 ## Acknowledgments
 
 SEC EDGAR data retrieval is powered by [edgartools](https://github.com/dgunning/edgartools)
