@@ -113,6 +113,13 @@ VALIDATION AND ERROR CHECKING:
 and document why)
 - Check rows should display "OK" (green) or "ERROR" (red)
 
+MANDATORY PRE-SAVE AUDIT:
+Before calling excel_save, ALWAYS call excel_audit_workbook first.  If any \
+sheets are flagged INCOMPLETE, populate them immediately before saving -- do \
+not save a workbook with empty sheets.  Every sheet that was created must \
+contain data.  An empty Balance Sheet or Cash Flow Statement is a critical \
+error: go back and fill it in using the financial data already retrieved.
+
 FORMATTING STANDARDS:
 - Numbers: Use thousands separator.  Show negative numbers in parentheses.
 - Percentages: One decimal place (e.g., 23.5%).

@@ -303,6 +303,59 @@ def excel_add_sheet(workbook_id: str, sheet_name: str) -> str:
     return f"Added sheet '{sheet_name}' to workbook '{workbook_id}'."
 
 
+def excel_audit_workbook(workbook_id: str, min_cells: int = 10) -> str:
+    """Audit all sheets in a workbook and flag empty or sparse ones.
+
+    Call this before saving to catch sheets that were created but never
+    populated.  Returns a plain-text report listing each sheet's cell count
+    and a PASS / INCOMPLETE status so the agent knows which sheets still
+    need to be filled in.
+
+    Args:
+        workbook_id: Workbook ID.
+        min_cells: Minimum number of populated (non-None) cells for a sheet
+            to be considered complete.  Sheets below this threshold are
+            flagged as INCOMPLETE.  Default 10.
+
+    Returns:
+        A multi-line audit report string.
+    """
+    wb = _get_workbook(workbook_id)
+
+    lines = [f"Workbook audit: '{workbook_id}'", ""]
+    incomplete: list[str] = []
+
+    for ws in wb.worksheets:
+        populated = [
+            cell
+            for row in ws.iter_rows()
+            for cell in row
+            if cell.value is not None
+        ]
+        count = len(populated)
+        status = "PASS" if count >= min_cells else "INCOMPLETE"
+
+        # Show a short sample of non-empty cell addresses for context.
+        sample = ", ".join(c.coordinate for c in populated[:5])
+        sample_str = f"  first cells: {sample}" if sample else "  (no data)"
+        lines.append(f"  [{status}] '{ws.title}': {count} populated cell(s){sample_str}")
+
+        if status == "INCOMPLETE":
+            incomplete.append(ws.title)
+
+    lines.append("")
+    if incomplete:
+        lines.append(
+            f"ACTION REQUIRED: {len(incomplete)} sheet(s) are empty or nearly empty: "
+            + ", ".join(f"'{s}'" for s in incomplete)
+            + ".  Populate these sheets before saving."
+        )
+    else:
+        lines.append("All sheets passed the minimum-cell threshold.")
+
+    return "\n".join(lines)
+
+
 def excel_save(
     workbook_id: str,
     filename: str | None = None,
@@ -398,6 +451,16 @@ def create_tools() -> list[FunctionTool]:
             fn=excel_add_sheet,
             name="excel_add_sheet",
             description="Add a new sheet to an existing workbook.",
+        ),
+        FunctionTool.from_defaults(
+            fn=excel_audit_workbook,
+            name="excel_audit_workbook",
+            description=(
+                "Audit all sheets in a workbook and flag any that are empty or "
+                "sparse (fewer than min_cells populated cells). Call this before "
+                "excel_save to catch sheets that were never filled in. Returns a "
+                "PASS/INCOMPLETE status per sheet and lists which sheets need work."
+            ),
         ),
         FunctionTool.from_defaults(
             fn=excel_save,
