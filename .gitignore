@@ -1,0 +1,71 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+sdist/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.python-version
+
+# Ruff
+.ruff_cache/
+
+# Mypy
+.mypy_cache/
+dmypy.json
+
+# Pytest
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Hermes runtime data
+output/
+hermes_data/
+.hermes/
+
+# Cache and local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+*.log
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AI coding assistants
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/

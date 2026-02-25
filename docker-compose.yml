@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Hermes Financial -- Docker Compose
+#
+# Services:
+#   hermes  : The main application container.
+#   chroma  : ChromaDB vector store for RAG (filing embeddings, etc.).
+#
+# Usage:
+#   docker compose up -d          # start both services
+#   docker compose run hermes python examples/quickstart.py
+#   docker compose down           # stop and remove containers
+# ---------------------------------------------------------------------------
+
+services:
+  hermes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hermes-app
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist data, cache, and output across container restarts.
+      - hermes-data:/app/data
+      - hermes-cache:/app/cache
+      - hermes-output:/app/output
+    environment:
+      # LLM provider configuration.
+      - HERMES_LLM_PROVIDER=${HERMES_LLM_PROVIDER:-anthropic}
+      - HERMES_LLM_MODEL=${HERMES_LLM_MODEL:-claude-sonnet-4-5-20250514}
+
+      # API keys -- set these in your shell or a .env file.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - HERMES_SEC_USER_AGENT=${HERMES_SEC_USER_AGENT:-}
+      - HERMES_FRED_API_KEY=${HERMES_FRED_API_KEY:-}
+      - HERMES_POLYGON_API_KEY=${HERMES_POLYGON_API_KEY:-}
+      - HERMES_FMP_API_KEY=${HERMES_FMP_API_KEY:-}
+
+      # Storage paths (match the volume mounts).
+      - HERMES_CHROMA_PERSIST_DIR=/app/data/chroma
+      - HERMES_OUTPUT_DIR=/app/output
+      - HERMES_CACHE_DIR=/app/cache
+
+      # ChromaDB connection -- point to the chroma service.
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8001
+
+      # General.
+      - HERMES_VERBOSE=${HERMES_VERBOSE:-false}
+    depends_on:
+      chroma:
+        condition: service_started
+    restart: unless-stopped
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: hermes-chroma
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+# Named volumes for persistent storage.
+volumes:
+  hermes-data:
+    driver: local
+  hermes-cache:
+    driver: local
+  hermes-output:
+    driver: local
+  chroma-data:
+    driver: local
