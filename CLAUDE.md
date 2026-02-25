@@ -17,12 +17,13 @@ library. This repo contains only the open-source library.
 - **Python >= 3.10** — modern type hints (`X | None`, not `Optional[X]`)
 - **LlamaIndex** — agent framework, tool wrappers, RAG pipelines
 - **Pydantic v2** — configuration and data models
-- **httpx** — async HTTP client for all API calls
+- **edgartools** — high-level SEC EDGAR API: XBRL parsing, structured financial statements, filing sections; sync-only, all calls wrapped in `asyncio.to_thread()`
+- **httpx** — async HTTP client for FRED, Yahoo Finance, and SEC EFTS full-text search
 - **openpyxl** — Excel workbook creation and manipulation
 - **python-docx** — Word document generation
 - **matplotlib** — chart generation (static PNG)
 - **ChromaDB** — local vector store for document retrieval
-- **BeautifulSoup4** — SEC filing HTML parsing
+- **BeautifulSoup4 / lxml** — used by `ingestion/sec_parser.py` for filing HTML → LlamaIndex nodes; not used by the SEC EDGAR tools
 
 ## Package Manager
 
@@ -64,12 +65,16 @@ hermes/
 - **Config** — `HermesConfig` is a Pydantic model with env var support.
   `configure()` creates/updates a module-level instance; `get_config()`
   provides lazy access.
-- **Rate limiting** — all HTTP tools use `get_limiter(name)` from
-  `infra/rate_limiter.py`. SEC EDGAR, FRED, and Yahoo Finance each have
-  pre-configured token bucket limits.
+- **Rate limiting** — `infra/rate_limiter.py` provides token bucket limiters.
+  edgartools manages its own 10 req/sec rate limit for SEC EDGAR internally.
+  Our limiter is used for FRED, Yahoo Finance, and SEC EFTS (full-text search).
 - **Caching** — `infra/cache.py` provides a file-based cache with per-item TTL.
   The `cached_request()` helper in `tools/_base.py` wraps the fetch-or-cache
-  pattern. Filing HTML is cached permanently; metadata has short TTLs.
+  pattern. edgartools manages its own HTTP cache for SEC filings internally;
+  our cache is used for EFTS search results and other non-edgartools calls.
+- **edgartools identity** — `hermes/tools/sec_edgar.py` calls `edgar.set_identity()`
+  once on first use, pulling `sec_user_agent` from `HermesConfig`. All edgartools
+  calls are sync and must be wrapped in `asyncio.to_thread()`.
 
 ### Agent Types
 
@@ -104,6 +109,9 @@ Default to `FunctionAgent`. Only use `ReActAgent` where the reasoning chain help
 - Tests in `tests/` mirroring the package structure
 - Use `pytest` with `pytest-asyncio` (mode=auto)
 - Mock HTTP calls for unit tests; mark live network tests with `@pytest.mark.network`
+- For SEC EDGAR tests: mock edgartools objects (`edgar.Company`, `edgar.get_by_accession_number`)
+  rather than HTTP calls — patch at the `edgar.*` level, not at the HTTP client level;
+  patch `hermes.tools.sec_edgar._ensure_identity` to skip identity setup in tool tests
 - Test fixtures in `tests/conftest.py`
 - Tests should create real files (Excel, Word) in temp dirs and verify contents
 
@@ -117,7 +125,8 @@ Default to `FunctionAgent`. Only use `ReActAgent` where the reasoning chain help
 
 ### Tier 1 (built-in, free)
 
-- **SEC EDGAR** — XBRL facts, full-text search, submissions, filings (`data.sec.gov`)
+- **SEC EDGAR** — XBRL financial statements, filing sections, submissions, insider
+  transactions via edgartools; full-text search via EFTS (`efts.sec.gov`)
 - **FRED** — 800k+ economic series (`api.stlouisfed.org`, free key)
 - **Yahoo Finance** — quotes, OHLCV history (public endpoints, no key)
 
@@ -127,10 +136,14 @@ Default to `FunctionAgent`. Only use `ReActAgent` where the reasoning chain help
 
 ### SEC EDGAR Rules
 
-- **Must set `sec_user_agent`** — SEC blocks requests without a descriptive User-Agent
-- **Rate limit: 10 req/sec** — enforced by the built-in rate limiter
-- Filing HTML is cached permanently (filings never change once filed)
-- XBRL data cached 24h, submissions cached 1h, ticker maps cached 7d
+- **Must set `sec_user_agent`** — passed to `edgar.set_identity()` on first call; SEC
+  blocks requests without a descriptive User-Agent string
+- **Rate limit: 10 req/sec** — enforced internally by edgartools; no configuration needed
+- edgartools manages its own HTTP caching for filings and XBRL data
+- Full-text search (`search_filings`, `get_institutional_holdings`) still uses our
+  `sec_efts_get` helper and our file cache (TTL: 1 hour) since edgartools has no EFTS
+- `get_filing_financial_tables(ticker, accession_number)` takes ticker + accession number,
+  **not** a URL — accession numbers come from `get_filing_urls()` results
 
 ## Common Tasks
 
