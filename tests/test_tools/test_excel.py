@@ -354,3 +354,123 @@ class TestSaveToDisk:
         wb3 = load_workbook(str(path))
         assert wb3.active["A1"].value == "version2"
         wb3.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: excel_audit_workbook
+# ---------------------------------------------------------------------------
+
+
+class TestAuditWorkbook:
+    """Test the workbook audit / empty-sheet detection tool."""
+
+    def _make_wb_with_sheets(self, sheets: dict[str, list[str]]) -> str:
+        """Create an in-memory workbook and return its ID.
+
+        Args:
+            sheets: Mapping of sheet name → list of cell values to write
+                (written sequentially from A1 down column A).
+        """
+        from hermes.tools.excel import _workbooks
+        from openpyxl import Workbook as _Workbook
+
+        wb = _Workbook()
+        sheet_names = list(sheets.keys())
+        wb.active.title = sheet_names[0]
+        for name in sheet_names[1:]:
+            wb.create_sheet(title=name)
+
+        for sheet_name, values in sheets.items():
+            ws = wb[sheet_name]
+            for row_idx, val in enumerate(values, start=1):
+                ws[f"A{row_idx}"] = val
+
+        wb_id = f"test_audit_{id(wb)}"
+        _workbooks[wb_id] = wb
+        return wb_id
+
+    def test_pass_when_all_sheets_populated(self) -> None:
+        """All sheets above min_cells threshold should report PASS."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Income Statement": [f"row{i}" for i in range(15)],
+            "Balance Sheet": [f"row{i}" for i in range(15)],
+        })
+
+        report = excel_audit_workbook(wb_id)
+
+        assert "PASS" in report
+        assert "INCOMPLETE" not in report
+        assert "ACTION REQUIRED" not in report
+
+    def test_flags_empty_sheet(self) -> None:
+        """An empty sheet should be flagged INCOMPLETE."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Income Statement": [f"row{i}" for i in range(15)],
+            "Balance Sheet": [],      # empty
+            "Cash Flow": [],          # empty
+        })
+
+        report = excel_audit_workbook(wb_id)
+
+        assert "[INCOMPLETE] 'Balance Sheet'" in report
+        assert "[INCOMPLETE] 'Cash Flow'" in report
+        assert "ACTION REQUIRED" in report
+        assert "Balance Sheet" in report.split("ACTION REQUIRED")[1]
+
+    def test_flags_sparse_sheet(self) -> None:
+        """A sheet with fewer than min_cells cells should be flagged."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Assumptions": [f"row{i}" for i in range(20)],
+            "DCF": ["one value"],   # only 1 cell — clearly incomplete
+        })
+
+        report = excel_audit_workbook(wb_id, min_cells=10)
+
+        assert "[INCOMPLETE] 'DCF'" in report
+        assert "[PASS] 'Assumptions'" in report
+
+    def test_custom_min_cells_threshold(self) -> None:
+        """A custom min_cells threshold should be respected."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Sheet1": [f"v{i}" for i in range(5)],
+        })
+
+        # With default threshold (10) → INCOMPLETE
+        assert "INCOMPLETE" in excel_audit_workbook(wb_id, min_cells=10)
+        # With low threshold (3) → PASS
+        assert "PASS" in excel_audit_workbook(wb_id, min_cells=3)
+
+    def test_report_includes_sheet_names(self) -> None:
+        """Audit report should list every sheet by name."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Cover": ["title"],
+            "Assumptions": ["a"] * 15,
+            "Balance Sheet": [],
+        })
+
+        report = excel_audit_workbook(wb_id)
+
+        assert "Cover" in report
+        assert "Assumptions" in report
+        assert "Balance Sheet" in report
+
+    def test_sample_cells_shown_for_populated_sheet(self) -> None:
+        """Report should include first-cell coordinates for non-empty sheets."""
+        from hermes.tools.excel import excel_audit_workbook
+
+        wb_id = self._make_wb_with_sheets({
+            "Income Statement": [f"v{i}" for i in range(15)],
+        })
+
+        report = excel_audit_workbook(wb_id)
+        assert "A1" in report  # at least the first cell coordinate shown
