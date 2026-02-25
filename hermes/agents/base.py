@@ -9,12 +9,84 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Gemini schema compatibility helpers
+# ---------------------------------------------------------------------------
+
+
+def _strip_additional_properties(schema: dict) -> None:
+    """Remove ``additionalProperties`` from a JSON schema dict in-place.
+
+    Recursively processes all nested schemas.  The Gemini API rejects schemas
+    that contain ``additionalProperties``, which Pydantic v2 emits for
+    ``dict[str, Any]`` parameters (as ``additionalProperties: true``).
+
+    Args:
+        schema: A JSON Schema dict, modified in-place.
+    """
+    schema.pop("additionalProperties", None)
+    for value in schema.values():
+        if isinstance(value, dict):
+            _strip_additional_properties(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _strip_additional_properties(item)
+
+
+def _is_google_llm(llm: Any) -> bool:
+    """Return True if *llm* is a GoogleGenAI instance.
+
+    Checked by class name to avoid a hard import of the optional package.
+    """
+    return type(llm).__name__ == "GoogleGenAI"
+
+
+def _make_gemini_safe_schema(orig_mjs: Any) -> Any:
+    """Wrap a ``model_json_schema`` classmethod to strip ``additionalProperties``.
+
+    Args:
+        orig_mjs: The original bound ``model_json_schema`` classmethod.
+
+    Returns:
+        A replacement classmethod that calls the original and then strips
+        ``additionalProperties`` from the result.
+    """
+
+    @classmethod  # type: ignore[misc]
+    def _safe_mjs(cls, **kwargs: Any) -> dict:
+        schema = orig_mjs(**kwargs)
+        _strip_additional_properties(schema)
+        return schema
+
+    return _safe_mjs
+
+
+def patch_tools_for_google(tools: list[Any]) -> None:
+    """Patch tool fn_schema classes to strip ``additionalProperties`` for Gemini.
+
+    Pydantic v2 emits ``additionalProperties: true`` for ``dict[str, Any]``
+    parameters.  The standard Gemini API rejects any schema containing this
+    keyword (even nested within a property definition).  This patches each
+    tool's schema class in-place so subsequent calls to ``model_json_schema()``
+    return a Gemini-compatible schema.
+
+    Args:
+        tools: List of LlamaIndex tool instances to patch.
+    """
+    for tool in tools:
+        try:
+            schema_cls = tool.metadata.fn_schema
+            schema_cls.model_json_schema = _make_gemini_safe_schema(
+                schema_cls.model_json_schema
+            )
+        except (AttributeError, TypeError):
+            pass
 
 
 class HermesAgent(ABC):
@@ -99,6 +171,10 @@ class HermesAgent(ABC):
 
         tools = self.get_tools()
         logger.debug("Agent %r get_tools() returned %d tools", self.name, len(tools))
+
+        if llm is not None and _is_google_llm(llm):
+            logger.debug("Patching %d tool schemas for Gemini API compatibility", len(tools))
+            patch_tools_for_google(tools)
 
         agent_cls = FunctionAgent if self.agent_type == "function" else ReActAgent
 
