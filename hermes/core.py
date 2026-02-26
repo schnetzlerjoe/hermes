@@ -20,6 +20,27 @@ from hermes.registry import Registry
 logger = logging.getLogger(__name__)
 
 
+def _extract_text(value: Any) -> str | None:
+    """Return plain text from a value that may be a str, ChatMessage, ToolOutput, etc.
+
+    LlamaIndex wraps LLM responses in ChatMessage objects and tool results in
+    ToolOutput objects.  Both carry the actual text in a ``.content`` attribute.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    # ChatMessage / ToolOutput and similar objects expose .content
+    content = getattr(value, "content", None)
+    if content is not None:
+        return str(content)
+    # Some objects use .text
+    text_attr = getattr(value, "text", None)
+    if text_attr is not None:
+        return str(text_attr)
+    return str(value)
+
+
 class Hermes:
     """High-level facade for the Hermes multi-agent financial research framework.
 
@@ -185,10 +206,11 @@ class Hermes:
         async for ev in handler.stream_events():
             ev_type = type(ev).__name__
             if ev_type == "AgentStream":
+                delta = getattr(ev, "delta", "")
                 yield StreamEvent(
                     type=EventType.TOKEN,
                     agent_name=getattr(ev, "agent_name", None),
-                    text=getattr(ev, "delta", ""),
+                    text=_extract_text(delta) or "",
                 )
             elif ev_type == "ToolCall":
                 yield StreamEvent(
@@ -197,23 +219,25 @@ class Hermes:
                     tool_name=getattr(ev, "tool_name", None),
                 )
             elif ev_type == "ToolCallResult":
+                raw_output = getattr(ev, "tool_output", None)
                 yield StreamEvent(
                     type=EventType.TOOL_RESULT,
                     agent_name=getattr(ev, "agent_name", None),
                     tool_name=getattr(ev, "tool_name", None),
-                    text=getattr(ev, "tool_output", None),
+                    text=_extract_text(raw_output),
                 )
             elif ev_type == "AgentOutput":
+                raw_response = getattr(ev, "response", None)
                 yield StreamEvent(
                     type=EventType.AGENT_OUTPUT,
                     agent_name=getattr(ev, "agent_name", None),
-                    text=getattr(ev, "response", str(ev)),
+                    text=_extract_text(raw_response),
                 )
 
         final_result = await handler
         yield StreamEvent(
             type=EventType.WORKFLOW_COMPLETE,
-            text=str(final_result),
+            text=_extract_text(final_result) or "",
         )
 
     def invoke(

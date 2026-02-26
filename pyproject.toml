@@ -39,6 +39,7 @@ dependencies = [
     "lxml>=5.0.0",
     "edgartools>=3.0.0",
     "llama-index-llms-google-genai>=0.8.7",
+    "gradio>=6.6.0",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,7 @@ groq = ["llama-index-llms-groq>=0.3.0"]
 ollama = ["llama-index-llms-ollama>=0.4.0"]
 huggingface = ["llama-index-llms-huggingface-api>=0.3.0"]
 cohere = ["llama-index-llms-cohere>=0.4.0"]
+demo = ["gradio>=5.0.0"]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -68,6 +70,7 @@ all = [
     "hermes-financial[ollama]",
     "hermes-financial[huggingface]",
     "hermes-financial[cohere]",
+    "hermes-financial[demo]",
     "hermes-financial[dev]",
 ]
 
