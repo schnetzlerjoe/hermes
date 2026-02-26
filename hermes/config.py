@@ -77,6 +77,8 @@ class HermesConfig(BaseModel):
 
     # -- Behaviour ------------------------------------------------------------
     verbose: bool = False
+    llm_max_retries: int = 3
+    llm_retry_max_wait: float = 120.0
 
     # -- Validators -----------------------------------------------------------
 

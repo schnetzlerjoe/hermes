@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from hermes.config import HermesConfig, configure, get_config
+from hermes.infra.retry import RetryConfig, extract_retry_after, is_rate_limit_error
 from hermes.infra.streaming import EventType, StreamEvent
 from hermes.llm_providers import build_llm, detect_provider
 from hermes.registry import Registry
@@ -70,7 +71,7 @@ class Hermes:
     ) -> None:
         # Build or adopt config
         if config is not None:
-            self._config = config
+            self._config = configure(**config.model_dump())
         elif config_kwargs or model or provider or verbose:
             overrides: dict[str, Any] = {**config_kwargs}
             if verbose:
@@ -163,15 +164,40 @@ class Hermes:
 
         from hermes.agents.orchestrator import ResearchOrchestrator
 
-        orchestrator = ResearchOrchestrator()
-        workflow = orchestrator.build_workflow(llm=llm)
-        handler = workflow.run(
-            user_msg=query, max_iterations=max_iterations, **kwargs
+        retry_cfg = RetryConfig(
+            max_retries=self._config.llm_max_retries,
+            max_wait=self._config.llm_retry_max_wait,
         )
-        result = await handler
+        provider = self._config.llm_provider
 
-        logger.info("Query complete")
-        return {"response": str(result)}
+        for attempt in range(retry_cfg.max_retries + 1):
+            try:
+                orchestrator = ResearchOrchestrator()
+                workflow = orchestrator.build_workflow(llm=llm)
+                handler = workflow.run(
+                    user_msg=query, max_iterations=max_iterations, **kwargs
+                )
+                result = await handler
+                logger.info("Query complete")
+                return {"response": _extract_text(result) or ""}
+            except Exception as exc:
+                if attempt < retry_cfg.max_retries and is_rate_limit_error(exc, provider):
+                    wait = min(
+                        extract_retry_after(exc, provider, retry_cfg),
+                        retry_cfg.max_wait,
+                    )
+                    logger.warning(
+                        "Rate limit [%s] on attempt %d/%d — waiting %.1fs",
+                        provider,
+                        attempt + 1,
+                        retry_cfg.max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
+        # Unreachable, but satisfies type checker
+        return {"response": ""}
 
     async def stream(
         self,
@@ -195,50 +221,75 @@ class Hermes:
 
         from hermes.agents.orchestrator import ResearchOrchestrator
 
-        orchestrator = ResearchOrchestrator()
-        workflow = orchestrator.build_workflow(llm=llm)
-        handler = workflow.run(
-            user_msg=query, max_iterations=max_iterations, **kwargs
+        retry_cfg = RetryConfig(
+            max_retries=self._config.llm_max_retries,
+            max_wait=self._config.llm_retry_max_wait,
         )
+        provider = self._config.llm_provider
 
         yield StreamEvent(type=EventType.WORKFLOW_START, text=query)
 
-        async for ev in handler.stream_events():
-            ev_type = type(ev).__name__
-            if ev_type == "AgentStream":
-                delta = getattr(ev, "delta", "")
-                yield StreamEvent(
-                    type=EventType.TOKEN,
-                    agent_name=getattr(ev, "agent_name", None),
-                    text=_extract_text(delta) or "",
-                )
-            elif ev_type == "ToolCall":
-                yield StreamEvent(
-                    type=EventType.TOOL_CALL,
-                    agent_name=getattr(ev, "agent_name", None),
-                    tool_name=getattr(ev, "tool_name", None),
-                )
-            elif ev_type == "ToolCallResult":
-                raw_output = getattr(ev, "tool_output", None)
-                yield StreamEvent(
-                    type=EventType.TOOL_RESULT,
-                    agent_name=getattr(ev, "agent_name", None),
-                    tool_name=getattr(ev, "tool_name", None),
-                    text=_extract_text(raw_output),
-                )
-            elif ev_type == "AgentOutput":
-                raw_response = getattr(ev, "response", None)
-                yield StreamEvent(
-                    type=EventType.AGENT_OUTPUT,
-                    agent_name=getattr(ev, "agent_name", None),
-                    text=_extract_text(raw_response),
+        for attempt in range(retry_cfg.max_retries + 1):
+            try:
+                orchestrator = ResearchOrchestrator()
+                workflow = orchestrator.build_workflow(llm=llm)
+                handler = workflow.run(
+                    user_msg=query, max_iterations=max_iterations, **kwargs
                 )
 
-        final_result = await handler
-        yield StreamEvent(
-            type=EventType.WORKFLOW_COMPLETE,
-            text=_extract_text(final_result) or "",
-        )
+                async for ev in handler.stream_events():
+                    ev_type = type(ev).__name__
+                    if ev_type == "AgentStream":
+                        delta = getattr(ev, "delta", "")
+                        yield StreamEvent(
+                            type=EventType.TOKEN,
+                            agent_name=getattr(ev, "agent_name", None),
+                            text=_extract_text(delta) or "",
+                        )
+                    elif ev_type == "ToolCall":
+                        yield StreamEvent(
+                            type=EventType.TOOL_CALL,
+                            agent_name=getattr(ev, "agent_name", None),
+                            tool_name=getattr(ev, "tool_name", None),
+                        )
+                    elif ev_type == "ToolCallResult":
+                        raw_output = getattr(ev, "tool_output", None)
+                        yield StreamEvent(
+                            type=EventType.TOOL_RESULT,
+                            agent_name=getattr(ev, "agent_name", None),
+                            tool_name=getattr(ev, "tool_name", None),
+                            text=_extract_text(raw_output),
+                        )
+                    elif ev_type == "AgentOutput":
+                        raw_response = getattr(ev, "response", None)
+                        yield StreamEvent(
+                            type=EventType.AGENT_OUTPUT,
+                            agent_name=getattr(ev, "agent_name", None),
+                            text=_extract_text(raw_response),
+                        )
+
+                final_result = await handler
+                yield StreamEvent(
+                    type=EventType.WORKFLOW_COMPLETE,
+                    text=_extract_text(final_result) or "",
+                )
+                return
+            except Exception as exc:
+                if attempt < retry_cfg.max_retries and is_rate_limit_error(exc, provider):
+                    wait = min(
+                        extract_retry_after(exc, provider, retry_cfg),
+                        retry_cfg.max_wait,
+                    )
+                    logger.warning(
+                        "Rate limit [%s] on attempt %d/%d — waiting %.1fs",
+                        provider,
+                        attempt + 1,
+                        retry_cfg.max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
 
     def invoke(
         self,
