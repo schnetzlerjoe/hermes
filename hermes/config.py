@@ -108,6 +108,22 @@ class HermesConfig(BaseModel):
 _config: HermesConfig | None = None
 
 
+def _env_overrides() -> dict[str, object]:
+    """Read HERMES_* environment variables and return as a field-name → value dict.
+
+    HermesConfig is a plain BaseModel (not pydantic-settings BaseSettings), so
+    env vars are not read automatically.  This helper bridges that gap so that
+    :func:`configure` and :func:`get_config` honour the documented HERMES_ prefix.
+    """
+    overrides: dict[str, object] = {}
+    for field_name in HermesConfig.model_fields:
+        env_key = f"HERMES_{field_name.upper()}"
+        val = os.environ.get(env_key)
+        if val is not None:
+            overrides[field_name] = val
+    return overrides
+
+
 def configure(**kwargs: object) -> HermesConfig:
     """Create or update the global :class:`HermesConfig`.
 
@@ -115,18 +131,23 @@ def configure(**kwargs: object) -> HermesConfig:
     global config already exists its current values are used as defaults so that
     callers only need to specify the fields they want to change.
 
+    Environment variables with the ``HERMES_`` prefix (e.g.
+    ``HERMES_LLM_PROVIDER=google``) are applied before explicit *kwargs*, so
+    kwargs always win.
+
     Returns:
         The newly created or updated :class:`HermesConfig` instance.
     """
     global _config  # noqa: PLW0603
 
+    env = _env_overrides()
+
     if _config is not None:
-        # Merge existing values with overrides so callers can do incremental
-        # updates (e.g. ``configure(verbose=True)`` without losing keys).
-        merged = {**_config.model_dump(), **kwargs}
+        # Merge: existing config < env vars < explicit kwargs
+        merged = {**_config.model_dump(), **env, **kwargs}
         _config = HermesConfig(**merged)
     else:
-        _config = HermesConfig(**kwargs)
+        _config = HermesConfig(**env, **kwargs)
 
     return _config
 
@@ -141,6 +162,6 @@ def get_config() -> HermesConfig:
     global _config  # noqa: PLW0603
 
     if _config is None:
-        _config = HermesConfig()
+        _config = HermesConfig(**_env_overrides())
 
     return _config
