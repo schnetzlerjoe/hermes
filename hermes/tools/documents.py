@@ -119,20 +119,39 @@ def doc_add_table(
     doc_id: str,
     headers: list[str],
     rows: list[list[str]],
+    title: str | None = None,
     style: str = "Light Grid Accent 1",
 ) -> str:
-    """Insert a formatted table.
+    """Insert a formatted table, optionally preceded by a bold title paragraph.
+
+    The *title* is written to the document immediately before the table in the
+    same call, guaranteeing the label always appears above the data regardless
+    of parallel tool-call execution order.
+
+    The table is set to stretch to 100 % of the page text-width so it never
+    overflows the margins.
 
     Args:
         doc_id: Document ID.
         headers: Column header labels.
         rows: 2D list of string values (one inner list per row).
+        title: Optional bold paragraph inserted directly above the table.
         style: Word table style name.
 
     Returns:
         Confirmation string with table dimensions.
     """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
     doc = _get_document(doc_id)
+
+    # Optional title paragraph — written before the table so order is guaranteed.
+    if title:
+        p = doc.add_paragraph()
+        run = p.add_run(title)
+        run.bold = True
+
     n_cols = len(headers)
     n_rows = len(rows) + 1  # +1 for header
 
@@ -143,6 +162,13 @@ def doc_add_table(
         table.style = style
     except KeyError:
         pass  # Default style is acceptable.
+
+    # Stretch table to 100 % of the page text-width so columns never overflow.
+    tblPr = table._tbl.tblPr
+    tblW = OxmlElement("w:tblW")
+    tblW.set(qn("w:w"), "5000")   # 5000 / 100 = 100 %
+    tblW.set(qn("w:type"), "pct")
+    tblPr.append(tblW)
 
     # Write headers with bold formatting.
     for col_idx, header in enumerate(headers):
@@ -302,6 +328,62 @@ def doc_export_pdf(
     return str(pdf_path.resolve())
 
 
+def doc_read(doc_id: str) -> str:
+    """Read back the full text content of an in-memory document for review.
+
+    Returns a structured text representation of all headings, paragraphs,
+    and tables so the agent can verify content before saving.
+
+    Args:
+        doc_id: Document ID returned by doc_create.
+
+    Returns:
+        Full document content as a structured string.
+    """
+    doc = _get_document(doc_id)
+    lines: list[str] = []
+
+    for block in doc.element.body:
+        tag = block.tag.split("}")[-1] if "}" in block.tag else block.tag
+
+        if tag == "p":
+            from docx.oxml.ns import qn
+            style_el = block.find(qn("w:pPr"))
+            style_name = ""
+            if style_el is not None:
+                style_id_el = style_el.find(qn("w:pStyle"))
+                if style_id_el is not None:
+                    style_name = style_id_el.get(qn("w:val"), "")
+            text = "".join(r.text for r in block.iter() if r.tag == qn("w:t") and r.text)
+            if not text.strip():
+                continue
+            if style_name.startswith("Heading"):
+                level = style_name[-1] if style_name[-1].isdigit() else "1"
+                lines.append(f"[HEADING {level}] {text}")
+            else:
+                lines.append(f"[PARA] {text}")
+
+        elif tag == "tbl":
+            from docx.oxml.ns import qn
+            rows_text: list[list[str]] = []
+            for row in block.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr"):
+                cells = []
+                for cell in row.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc"):
+                    cell_text = "".join(
+                        t.text for t in cell.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+                        if t.text
+                    )
+                    cells.append(cell_text.strip())
+                if cells:
+                    rows_text.append(cells)
+            if rows_text:
+                lines.append(f"[TABLE {len(rows_text)}x{len(rows_text[0])}]")
+                for row in rows_text:
+                    lines.append("  | " + " | ".join(row) + " |")
+
+    return "\n".join(lines) if lines else "(empty document)"
+
+
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
@@ -351,6 +433,14 @@ def create_tools() -> list[FunctionTool]:
             fn=doc_add_page_break,
             name="doc_add_page_break",
             description="Insert a page break into a Word document.",
+        ),
+        FunctionTool.from_defaults(
+            fn=doc_read,
+            name="doc_read",
+            description=(
+                "Read back the full content of an in-memory document as structured text. "
+                "Use this to verify headings, paragraphs, and tables before saving."
+            ),
         ),
         FunctionTool.from_defaults(
             fn=doc_save,
