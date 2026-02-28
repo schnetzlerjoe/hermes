@@ -38,15 +38,13 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "lxml>=5.0.0",
     "edgartools>=3.0.0",
-    "llama-index-llms-google-genai>=0.8.7",
-    "gradio>=6.6.0",
 ]
 
 [project.optional-dependencies]
 llamaparse = ["llama-parse>=0.5.0"]
 web = ["llama-index-readers-web>=0.3.0"]
 pandas = ["pandas>=2.0.0"]
-google = ["llama-index-llms-google-genai>=0.4.0"]
+google = ["llama-index-llms-google-genai>=0.8.7"]
 mistral = ["llama-index-llms-mistralai>=0.3.0"]
 groq = ["llama-index-llms-groq>=0.3.0"]
 ollama = ["llama-index-llms-ollama>=0.4.0"]
