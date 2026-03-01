@@ -332,7 +332,10 @@ def doc_read(doc_id: str) -> str:
     """Read back the full text content of an in-memory document for review.
 
     Returns a structured text representation of all headings, paragraphs,
-    and tables so the agent can verify content before saving.
+    and tables so the agent can verify content before saving.  Every block
+    is prefixed with its 1-based body index ``[N]`` so you can pass it to
+    ``doc_edit_paragraph``.  Tables are also numbered ``[TABLE T]`` for use
+    with ``doc_edit_table_cell``.
 
     Args:
         doc_id: Document ID returned by doc_create.
@@ -340,14 +343,18 @@ def doc_read(doc_id: str) -> str:
     Returns:
         Full document content as a structured string.
     """
+    from docx.oxml.ns import qn
+
+    _WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
     doc = _get_document(doc_id)
     lines: list[str] = []
+    table_count = 0
 
-    for block in doc.element.body:
+    for block_idx, block in enumerate(doc.element.body, start=1):
         tag = block.tag.split("}")[-1] if "}" in block.tag else block.tag
 
         if tag == "p":
-            from docx.oxml.ns import qn
             style_el = block.find(qn("w:pPr"))
             style_name = ""
             if style_el is not None:
@@ -359,29 +366,120 @@ def doc_read(doc_id: str) -> str:
                 continue
             if style_name.startswith("Heading"):
                 level = style_name[-1] if style_name[-1].isdigit() else "1"
-                lines.append(f"[HEADING {level}] {text}")
+                lines.append(f"[{block_idx}] [HEADING {level}] {text}")
             else:
-                lines.append(f"[PARA] {text}")
+                lines.append(f"[{block_idx}] [PARA] {text}")
 
         elif tag == "tbl":
-            from docx.oxml.ns import qn
+            table_count += 1
             rows_text: list[list[str]] = []
-            for row in block.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr"):
+            for row in block.iter(f"{{{_WNS}}}tr"):
                 cells = []
-                for cell in row.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc"):
+                for cell in row.iter(f"{{{_WNS}}}tc"):
                     cell_text = "".join(
-                        t.text for t in cell.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
-                        if t.text
+                        t.text for t in cell.iter(f"{{{_WNS}}}t") if t.text
                     )
                     cells.append(cell_text.strip())
                 if cells:
                     rows_text.append(cells)
             if rows_text:
-                lines.append(f"[TABLE {len(rows_text)}x{len(rows_text[0])}]")
-                for row in rows_text:
-                    lines.append("  | " + " | ".join(row) + " |")
+                lines.append(
+                    f"[{block_idx}] [TABLE {table_count}: "
+                    f"{len(rows_text)}x{len(rows_text[0])}]"
+                )
+                for row_i, row in enumerate(rows_text, start=1):
+                    lines.append(f"  [r{row_i}] " + " | ".join(row))
 
     return "\n".join(lines) if lines else "(empty document)"
+
+
+def doc_edit_paragraph(doc_id: str, block_index: int, new_text: str) -> str:
+    """Replace the text of an existing body paragraph or heading.
+
+    Use ``doc_read`` first to identify the correct ``block_index`` (the ``[N]``
+    prefix shown for each block).  Only paragraph/heading blocks can be edited
+    with this tool — for table cells use ``doc_edit_table_cell``.
+
+    Args:
+        doc_id: Document ID.
+        block_index: 1-based body-block index as shown by doc_read.
+        new_text: Replacement text (preserves the paragraph's style).
+
+    Returns:
+        Confirmation string.
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = _get_document(doc_id)
+    blocks = list(doc.element.body)
+    if block_index < 1 or block_index > len(blocks):
+        raise ValueError(
+            f"block_index {block_index} out of range (1..{len(blocks)}). "
+            "Use doc_read to list valid indices."
+        )
+    block = blocks[block_index - 1]
+    tag = block.tag.split("}")[-1] if "}" in block.tag else block.tag
+    if tag != "p":
+        raise ValueError(
+            f"Block {block_index} is a '{tag}', not a paragraph. "
+            "Use doc_edit_table_cell for table content."
+        )
+    # Remove all existing runs, keeping paragraph properties (style) intact.
+    for run_el in block.findall(qn("w:r")):
+        block.remove(run_el)
+    # Insert a single new run with the replacement text.
+    r_el = OxmlElement("w:r")
+    t_el = OxmlElement("w:t")
+    t_el.text = new_text
+    if new_text and (new_text[0] == " " or new_text[-1] == " "):
+        t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    r_el.append(t_el)
+    block.append(r_el)
+    return f"Block {block_index} updated ({len(new_text)} chars)."
+
+
+def doc_edit_table_cell(
+    doc_id: str,
+    table_index: int,
+    row_index: int,
+    col_index: int,
+    new_text: str,
+) -> str:
+    """Replace the text of a single table cell.
+
+    Use ``doc_read`` to identify the table number (``[TABLE T: ...]``) and row
+    number (``[rN]``).  Column index is 1-based left-to-right.
+
+    Args:
+        doc_id: Document ID.
+        table_index: 1-based table number as shown by doc_read (TABLE 1, TABLE 2, …).
+        row_index: 1-based row number (1 = header row, 2 = first data row, …).
+        col_index: 1-based column number.
+        new_text: Replacement cell text.
+
+    Returns:
+        Confirmation string.
+    """
+    doc = _get_document(doc_id)
+    tables = doc.tables
+    if table_index < 1 or table_index > len(tables):
+        raise ValueError(
+            f"table_index {table_index} out of range (1..{len(tables)}). "
+            "Use doc_read to see available tables."
+        )
+    table = tables[table_index - 1]
+    if row_index < 1 or row_index > len(table.rows):
+        raise ValueError(
+            f"row_index {row_index} out of range (1..{len(table.rows)})."
+        )
+    row = table.rows[row_index - 1]
+    if col_index < 1 or col_index > len(row.cells):
+        raise ValueError(
+            f"col_index {col_index} out of range (1..{len(row.cells)})."
+        )
+    row.cells[col_index - 1].text = new_text
+    return f"Table {table_index} cell [r{row_index}, c{col_index}] updated to {new_text!r}."
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +537,26 @@ def create_tools() -> list[FunctionTool]:
             name="doc_read",
             description=(
                 "Read back the full content of an in-memory document as structured text. "
-                "Use this to verify headings, paragraphs, and tables before saving."
+                "Each block is prefixed with its [N] index for use with doc_edit_paragraph. "
+                "Tables are numbered [TABLE T] for use with doc_edit_table_cell."
+            ),
+        ),
+        FunctionTool.from_defaults(
+            fn=doc_edit_paragraph,
+            name="doc_edit_paragraph",
+            description=(
+                "Replace the text of an existing paragraph or heading by its block index "
+                "(shown as [N] in doc_read output). Use to fix mistakes without adding "
+                "new paragraphs."
+            ),
+        ),
+        FunctionTool.from_defaults(
+            fn=doc_edit_table_cell,
+            name="doc_edit_table_cell",
+            description=(
+                "Replace the text of a single table cell. Specify table number (TABLE T "
+                "from doc_read), 1-based row and column. Use to correct individual cell "
+                "values without re-writing the whole table."
             ),
         ),
         FunctionTool.from_defaults(
