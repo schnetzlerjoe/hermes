@@ -17,6 +17,65 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# LlamaIndex maps max_tokens → max_completion_tokens only for these model ids (exact match).
+try:
+    from llama_index.llms.openai.utils import O1_MODELS as _LI_O1_MODELS
+
+    _OPENAI_REASONING_MODEL_IDS: frozenset[str] = frozenset(_LI_O1_MODELS.keys())
+except ImportError:  # pragma: no cover - llama-index is a core dependency
+    _OPENAI_REASONING_MODEL_IDS = frozenset()
+
+
+def _openai_model_needs_canonical_id(model: str) -> bool:
+    """Return True if *model* should be lowercased for LlamaIndex OpenAI token handling.
+
+    OpenAI's chat completions API expects ``max_completion_tokens`` for reasoning models
+    instead of ``max_tokens``. LlamaIndex's OpenAI LLM maps ``max_tokens`` only when
+    ``self.model`` is an exact key in ``O1_MODELS`` (lowercase). Non-canonical casing
+    (e.g. ``O3-mini``) skips that branch and the API may reject ``max_tokens``.
+
+    Args:
+        model: Raw model string from configuration.
+
+    Returns:
+        Whether the identifier should be normalized with :func:`_canonical_openai_model_id`.
+    """
+    ml = model.strip().lower()
+    if ml in _OPENAI_REASONING_MODEL_IDS:
+        return True
+    # Forward-compatible: new reasoning-style ids not yet in the installed LlamaIndex.
+    return ml.startswith(("o1", "o3", "o4", "gpt-5"))
+
+
+def _canonical_openai_model_id(model: str) -> str:
+    """Return lowercase model id when it is a known reasoning / O1_MODELS OpenAI model."""
+    return model.strip().lower()
+
+
+def _resolve_llm_model_id(spec: ProviderSpec, model: str) -> str:
+    """Resolve the model string passed to the LlamaIndex LLM constructor.
+
+    OpenAI-compatible classes that inherit ``llama_index.llms.openai.base.OpenAI`` rely on
+    exact ``O1_MODELS`` keys for ``max_tokens`` → ``max_completion_tokens`` conversion.
+
+    Args:
+        spec: Provider specification.
+        model: User-configured model name.
+
+    Returns:
+        Model id to pass to the LLM class (``model`` or ``model_name``, etc.).
+    """
+    if spec.class_name == "OpenAI" and spec.import_module == "llama_index.llms.openai":
+        if _openai_model_needs_canonical_id(model):
+            return _canonical_openai_model_id(model)
+        return model.strip()
+    # Groq subclasses OpenAILike → OpenAI; same ``model in O1_MODELS`` behaviour.
+    if spec.class_name == "Groq":
+        if _openai_model_needs_canonical_id(model):
+            return _canonical_openai_model_id(model)
+        return model.strip()
+    return model.strip()
+
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -193,7 +252,8 @@ def build_llm(provider: str, model: str, config: Any) -> Any:
 
     cls = getattr(module, spec.class_name)
 
-    kwargs: dict[str, Any] = {spec.model_kwarg: model}
+    resolved_model = _resolve_llm_model_id(spec, model)
+    kwargs: dict[str, Any] = {spec.model_kwarg: resolved_model}
     kwargs.update(spec.extra_kwargs)
 
     if spec.api_key_config_field:
@@ -201,5 +261,13 @@ def build_llm(provider: str, model: str, config: Any) -> Any:
         if key:
             kwargs["api_key"] = key
 
-    logger.info("Building LLM: provider=%r, model=%r, class=%s", provider, model, spec.class_name)
+    max_tokens = getattr(config, "llm_max_tokens", 8192)
+    # LlamaIndex OpenAI maps this to max_completion_tokens for O1_MODELS when model id
+    # matches; see _resolve_llm_model_id.
+    kwargs["max_tokens"] = max_tokens
+
+    logger.info(
+        "Building LLM: provider=%r, model=%r, class=%s, max_tokens=%d",
+        provider, resolved_model, spec.class_name, max_tokens,
+    )
     return cls(**kwargs)

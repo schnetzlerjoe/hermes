@@ -91,6 +91,9 @@ For a MACRO IMPACT QUESTION (e.g., "How would a recession affect banks?"):
 - Synthesize into a macro impact analysis.
 
 DELEGATION GUIDELINES:
+- When using the workflow handoff tool to delegate, you MUST pass both \
+arguments: to_agent (the exact specialist agent name) and reason (a brief \
+explanation of what you need). Omitting either will fail the handoff.
 - Be explicit when handing off to a specialist.  State exactly what data you \
 need and in what format.
 - Provide ticker symbols, date ranges, and specific filing types rather than \
@@ -241,6 +244,8 @@ class ResearchOrchestrator(HermesAgent):
             self.name,
         )
 
+        # Handoff tool instructions for to_agent/reason are in _SYSTEM_PROMPT; LlamaIndex
+        # fills agent lists into the default handoff tool description at runtime.
         return AgentWorkflow(
             agents=agents,
             root_agent=self.name,

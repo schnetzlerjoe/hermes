@@ -42,6 +42,25 @@ def _extract_text(value: Any) -> str | None:
     return str(value)
 
 
+def _looks_like_absolute_file_path(stripped: str) -> bool:
+    """True if *stripped* looks like a POSIX or Windows absolute path string.
+
+    Windows drive paths must start with a letter, then ``:``, then ``\\`` or ``/``
+    (e.g. ``C:\\Users`` or ``C:/Users``). A lone ``:`` at index 1 is not enough:
+    ``a:invalid`` and ``1:\\foo`` must not match.
+    """
+    if stripped.startswith("/"):
+        return True
+    if len(stripped) < 3:
+        return False
+    c0, c1, c2 = stripped[0], stripped[1], stripped[2]
+    if c1 != ":":
+        return False
+    if not (c0.isascii() and c0.isalpha()):
+        return False
+    return c2 in ("\\", "/")
+
+
 class Hermes:
     """High-level facade for the Hermes multi-agent financial research framework.
 
@@ -254,12 +273,26 @@ class Hermes:
                         )
                     elif ev_type == "ToolCallResult":
                         raw_output = getattr(ev, "tool_output", None)
+                        tool_name = getattr(ev, "tool_name", None)
+                        result_text = _extract_text(raw_output)
                         yield StreamEvent(
                             type=EventType.TOOL_RESULT,
                             agent_name=getattr(ev, "agent_name", None),
-                            tool_name=getattr(ev, "tool_name", None),
-                            text=_extract_text(raw_output),
+                            tool_name=tool_name,
+                            text=result_text,
                         )
+                        # Emit FILE_CREATED for tools that return file paths.
+                        # excel_save and doc_save return the absolute path as
+                        # their result string.
+                        if tool_name in ("excel_save", "doc_save") and result_text:
+                            stripped = result_text.strip()
+                            if _looks_like_absolute_file_path(stripped):
+                                yield StreamEvent(
+                                    type=EventType.FILE_CREATED,
+                                    agent_name=getattr(ev, "agent_name", None),
+                                    tool_name=tool_name,
+                                    file_path=stripped,
+                                )
                     elif ev_type == "AgentOutput":
                         raw_response = getattr(ev, "response", None)
                         yield StreamEvent(

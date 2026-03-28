@@ -124,6 +124,20 @@ class TestBuildLlm:
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs[expected_model_kwarg] == "test-model"
 
+    def test_openai_reasoning_model_id_canonicalized_for_token_mapping(self) -> None:
+        """Uppercase reasoning model ids must match LlamaIndex O1_MODELS keys (lowercase)."""
+        config = self._make_config()
+        mock_cls = MagicMock()
+        mock_module = MagicMock()
+        mock_module.OpenAI = mock_cls
+
+        with patch("hermes.llm_providers.importlib.import_module", return_value=mock_module):
+            build_llm("openai", "O3-mini", config)
+
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["model"] == "o3-mini"
+        assert call_kwargs["max_tokens"] == 8192
+
     def test_xai_passes_api_base(self) -> None:
         config = self._make_config(xai_api_key="xai-key-123")
         mock_cls = MagicMock()
