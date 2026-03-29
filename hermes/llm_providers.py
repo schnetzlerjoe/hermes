@@ -328,12 +328,14 @@ def _wrap_with_retry(llm: Any, provider: str) -> Any:
                     ):
                         wait = _BACKOFF_SECONDS[attempt]
                         logger.warning(
-                            "LLM %s error (attempt %d/%d) — retrying in %.0fs: %s",
+                            "LLM %s error (attempt %d/%d) — retrying in %.0fs: %s: %s",
                             method_name,
                             attempt + 1,
                             len(_BACKOFF_SECONDS) + 1,
                             wait,
                             type(exc).__name__,
+                            exc,
+                            exc_info=True,
                         )
                         await asyncio.sleep(wait)
                     else:

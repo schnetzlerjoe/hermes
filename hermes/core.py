@@ -209,12 +209,14 @@ class Hermes:
                 ):
                     wait = _WORKFLOW_BACKOFF[min(attempt, len(_WORKFLOW_BACKOFF) - 1)]
                     logger.warning(
-                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s",
+                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s: %s",
                         provider,
                         attempt + 1,
                         retry_cfg.max_retries,
                         wait,
                         type(exc).__name__,
+                        exc,
+                        exc_info=True,
                     )
                     await asyncio.sleep(wait)
                 else:
@@ -319,12 +321,14 @@ class Hermes:
                 ):
                     wait = _WORKFLOW_BACKOFF[min(attempt, len(_WORKFLOW_BACKOFF) - 1)]
                     logger.warning(
-                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s",
+                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s: %s",
                         provider,
                         attempt + 1,
                         retry_cfg.max_retries,
                         wait,
                         type(exc).__name__,
+                        exc,
+                        exc_info=True,
                     )
                     await asyncio.sleep(wait)
                 else:
