@@ -43,6 +43,56 @@ def _get_document(doc_id: str) -> Document:
 # ---------------------------------------------------------------------------
 
 
+def list_output_files(pattern: str = "*") -> str:
+    """List files in the configured output directory.
+
+    Scans the same directory where ``excel_save`` and ``doc_save`` write their
+    files.  Use this to discover existing artefacts (e.g. on a retry attempt)
+    before deciding whether to load or recreate them.
+
+    Args:
+        pattern: Glob pattern to filter results (e.g. ``"*.xlsx"``, ``"GO_*"``,
+            ``"*"`` for everything).  Case-sensitive on Linux.
+
+    Returns:
+        Newline-separated list of absolute file paths, or a message if the
+        directory is empty or does not exist.
+    """
+    from hermes.config import get_config
+
+    output_dir = Path(get_config().output_dir)
+    if not output_dir.exists():
+        return f"Output directory does not exist: {output_dir}"
+
+    matches = sorted(output_dir.glob(pattern))
+    if not matches:
+        return f"No files matching '{pattern}' in {output_dir}"
+
+    return "\n".join(str(p.resolve()) for p in matches)
+
+
+def doc_load(path: str) -> str:
+    """Load an existing Word document from disk into memory for editing.
+
+    Use this when a previous attempt already created a .docx file and you
+    need to expand or fix it rather than starting from scratch.
+
+    Args:
+        path: Absolute path to an existing ``.docx`` file.
+
+    Returns:
+        Document ID for use in subsequent ``doc_*`` operations.
+    """
+    p = Path(path)
+    if not p.exists():
+        return f"Error: file not found at {path}"
+    doc = Document(str(p))
+    doc_id = f"{p.stem}_{uuid.uuid4().hex[:8]}"
+    _documents[doc_id] = doc
+    logger.info("Loaded document %s from %s", doc_id, path)
+    return doc_id
+
+
 def doc_create(name: str, title: str | None = None) -> str:
     """Create a new Word document.
 
@@ -490,6 +540,25 @@ def doc_edit_table_cell(
 def create_tools() -> list[FunctionTool]:
     """Create LlamaIndex FunctionTool instances for all document tools."""
     return [
+        FunctionTool.from_defaults(
+            fn=list_output_files,
+            name="list_output_files",
+            description=(
+                "List files in the output directory (same folder where excel_save and "
+                "doc_save write files). Use on retry attempts to discover existing .xlsx "
+                "and .docx artefacts before deciding to load or recreate them. Accepts an "
+                "optional glob pattern (e.g. '*.xlsx', 'GO_*', '*' for everything)."
+            ),
+        ),
+        FunctionTool.from_defaults(
+            fn=doc_load,
+            name="doc_load",
+            description=(
+                "Load an existing .docx file from disk into memory for editing. "
+                "Use on retry attempts when a report was already generated but needs "
+                "to be expanded or fixed. Returns the document ID."
+            ),
+        ),
         FunctionTool.from_defaults(
             fn=doc_create,
             name="doc_create",

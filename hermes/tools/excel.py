@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from llama_index.core.tools import FunctionTool
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.chart import BarChart, LineChart, PieChart, Reference, ScatterChart
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import range_boundaries
@@ -43,6 +43,28 @@ def _get_workbook(workbook_id: str) -> Workbook:
 # ---------------------------------------------------------------------------
 # Tool functions
 # ---------------------------------------------------------------------------
+
+
+def excel_load(path: str) -> str:
+    """Load an existing Excel workbook from disk into memory for editing.
+
+    Use this when a previous attempt already created an ``.xlsx`` file and
+    you need to modify it rather than rebuilding from scratch.
+
+    Args:
+        path: Absolute path to an existing ``.xlsx`` file.
+
+    Returns:
+        Workbook ID for use in subsequent ``excel_*`` operations.
+    """
+    p = Path(path)
+    if not p.exists():
+        return f"Error: file not found at {path}"
+    wb = load_workbook(str(p))
+    workbook_id = f"{p.stem}_{uuid.uuid4().hex[:8]}"
+    _workbooks[workbook_id] = wb
+    logger.info("Loaded workbook %s from %s", workbook_id, path)
+    return workbook_id
 
 
 def excel_create_workbook(
@@ -398,6 +420,15 @@ def excel_save(
 def create_tools() -> list[FunctionTool]:
     """Create LlamaIndex FunctionTool instances for all Excel tools."""
     return [
+        FunctionTool.from_defaults(
+            fn=excel_load,
+            name="excel_load",
+            description=(
+                "Load an existing .xlsx file from disk into memory for editing. "
+                "Use on retry attempts when a workbook was already generated but "
+                "needs fixes. Returns the workbook ID."
+            ),
+        ),
         FunctionTool.from_defaults(
             fn=excel_create_workbook,
             name="excel_create_workbook",
