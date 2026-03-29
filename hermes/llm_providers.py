@@ -304,6 +304,36 @@ def build_llm(provider: str, model: str, config: Any) -> Any:
 _BACKOFF_SECONDS: list[float] = [5.0, 15.0, 30.0]
 
 
+def _clean_messages_for_deepseek(messages: Any) -> Any:
+    """Strip tool messages not immediately preceded by an assistant tool_calls message.
+
+    DeepSeek (and some other providers) strictly require that every
+    ``role: tool`` message follows an ``role: assistant`` message that contains
+    ``tool_calls``.  LlamaIndex's multi-agent handoff can produce orphaned tool
+    messages (e.g. when the orchestrator rebuilds context after a handoff).
+    Dropping them is safe — they are redundant context, not missing data.
+    """
+    if not messages:
+        return messages
+    cleaned: list[Any] = []
+    for msg in messages:
+        role = getattr(msg, "role", None)
+        role_str = str(role).lower() if role is not None else ""
+        if "tool" in role_str and role_str != "assistant":
+            # Keep only if the last kept message is an assistant with tool_calls.
+            if cleaned:
+                prev = cleaned[-1]
+                prev_kwargs = getattr(prev, "additional_kwargs", {}) or {}
+                if prev_kwargs.get("tool_calls"):
+                    cleaned.append(msg)
+                    continue
+            # Orphaned tool message — drop it.
+            logger.debug("Dropping orphaned tool message for DeepSeek compatibility")
+        else:
+            cleaned.append(msg)
+    return type(messages)(cleaned) if not isinstance(messages, list) else cleaned
+
+
 def _wrap_with_retry(llm: Any, provider: str) -> Any:
     """Wrap LLM async chat/complete methods with per-call exponential backoff.
 
@@ -320,9 +350,33 @@ def _wrap_with_retry(llm: Any, provider: str) -> Any:
     # Imported here to avoid circular imports (retry imports nothing from here).
     from hermes.infra.retry import is_rate_limit_error, is_transient_error
 
+    needs_message_cleanup = provider == "deepseek"
+
+    def _make_stream_cleaned(original: Any) -> Any:
+        """Wrap astream_chat with message cleanup.
+
+        astream_chat is ``async def`` returning an async generator — it must be
+        awaited, then iterated.  We clean messages before delegating so we must
+        not change the calling convention (no ``yield`` here).
+        """
+        @functools.wraps(original)
+        async def _cleaned(*args: Any, **kwargs: Any) -> Any:
+            if args:
+                args = (_clean_messages_for_deepseek(args[0]),) + args[1:]
+            elif "messages" in kwargs:
+                kwargs["messages"] = _clean_messages_for_deepseek(kwargs["messages"])
+            return await original(*args, **kwargs)
+        return _cleaned
+
     def _make_retried(original: Any, method_name: str) -> Any:
         @functools.wraps(original)
         async def _retried(*args: Any, **kwargs: Any) -> Any:
+            # DeepSeek rejects orphaned tool messages — clean before sending.
+            if needs_message_cleanup and method_name == "achat":
+                if args:
+                    args = (_clean_messages_for_deepseek(args[0]),) + args[1:]
+                elif "messages" in kwargs:
+                    kwargs["messages"] = _clean_messages_for_deepseek(kwargs["messages"])
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 try:
                     return await original(*args, **kwargs)
@@ -362,5 +416,14 @@ def _wrap_with_retry(llm: Any, provider: str) -> Any:
                     type(llm).__name__,
                     method_name,
                 )
+
+    # DeepSeek: also patch the streaming method used by FunctionAgent.
+    if needs_message_cleanup:
+        original_stream = getattr(llm, "astream_chat", None)
+        if callable(original_stream):
+            try:
+                object.__setattr__(llm, "astream_chat", _make_stream_cleaned(original_stream))
+            except (AttributeError, TypeError):
+                logger.debug("Could not patch %s.astream_chat for DeepSeek cleanup", type(llm).__name__)
 
     return llm
