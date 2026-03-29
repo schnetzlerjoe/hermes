@@ -16,7 +16,7 @@ from typing import Any
 from llama_index.core.tools import FunctionTool
 
 from hermes.config import get_config
-from hermes.infra.cache import TTL_1_HOUR
+from hermes.infra.cache import TTL_1_HOUR, TTL_24_HOURS, TTL_PERMANENT
 from hermes.tools._base import cached_request, sec_efts_get
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,14 @@ async def get_company_facts(ticker: str) -> dict:
 
         return result
 
-    return await asyncio.to_thread(_fetch)
+    cache_key = f"company_facts_{ticker.upper()}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return json.dumps(result, default=str).encode()
+
+    raw = await cached_request("sec_company_facts", cache_key, _fetch_bytes, ttl=TTL_24_HOURS)
+    return json.loads(raw)
 
 
 async def search_filings(
@@ -198,7 +205,14 @@ async def get_submissions(ticker: str, limit: int = 200) -> dict:
         result["recentFilings"] = filings_list
         return result
 
-    return await asyncio.to_thread(_fetch)
+    cache_key = f"submissions_{ticker.upper()}_{limit}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return json.dumps(result, default=str).encode()
+
+    raw = await cached_request("sec_submissions", cache_key, _fetch_bytes, ttl=TTL_24_HOURS)
+    return json.loads(raw)
 
 
 async def get_filing_urls(
@@ -243,7 +257,14 @@ async def get_filing_urls(
         matched.sort(key=lambda f: f.get("filingDate", ""), reverse=True)
         return matched
 
-    return await asyncio.to_thread(_fetch)
+    cache_key = f"filing_urls_{ticker.upper()}_{filing_types}_{limit}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return json.dumps(result, default=str).encode()
+
+    raw = await cached_request("sec_filing_urls", cache_key, _fetch_bytes, ttl=TTL_24_HOURS)
+    return json.loads(raw)
 
 
 async def get_filing_financial_tables(
@@ -303,7 +324,17 @@ async def get_filing_financial_tables(
 
         return "\n\n---\n\n".join(sections)
 
-    return await asyncio.to_thread(_fetch)
+    # Accession numbers are globally unique and immutable — cache permanently.
+    cache_key = f"financial_tables_{accession_number}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return result.encode("utf-8")
+
+    raw = await cached_request(
+        "sec_financial_tables", cache_key, _fetch_bytes, ttl=TTL_PERMANENT
+    )
+    return raw.decode("utf-8")
 
 
 async def get_filing_text(url: str, max_chars: int = 150_000) -> str:
@@ -372,7 +403,17 @@ async def get_filing_text(url: str, max_chars: int = 150_000) -> str:
             text = text[:max_chars] + "\n\n[... truncated ...]"
         return text
 
-    return await asyncio.to_thread(_fetch)
+    # Include max_chars in cache key since it affects the result.
+    # Accession-number-based URLs are immutable — cache permanently.
+    accession_no = _extract_accession_number(url)
+    cache_key = f"filing_text_{accession_no or url}_{max_chars}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return result.encode("utf-8")
+
+    raw = await cached_request("sec_filing_text", cache_key, _fetch_bytes, ttl=TTL_PERMANENT)
+    return raw.decode("utf-8")
 
 
 async def get_filing_content(url: str, max_chars: int = 80_000) -> str:
@@ -415,7 +456,17 @@ async def get_filing_content(url: str, max_chars: int = 80_000) -> str:
             text = text[:max_chars] + "\n\n[... truncated ...]"
         return text
 
-    return await asyncio.to_thread(_fetch)
+    accession_no = _extract_accession_number(url)
+    cache_key = f"filing_content_{accession_no or url}_{max_chars}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return result.encode("utf-8")
+
+    raw = await cached_request(
+        "sec_filing_content", cache_key, _fetch_bytes, ttl=TTL_PERMANENT
+    )
+    return raw.decode("utf-8")
 
 
 async def get_insider_transactions(ticker: str) -> list[dict]:
@@ -452,7 +503,16 @@ async def get_insider_transactions(ticker: str) -> list[dict]:
 
         return transactions
 
-    return await asyncio.to_thread(_fetch)
+    cache_key = f"insider_transactions_{ticker.upper()}"
+
+    async def _fetch_bytes() -> bytes:
+        result = await asyncio.to_thread(_fetch)
+        return json.dumps(result, default=str).encode()
+
+    raw = await cached_request(
+        "sec_insider_transactions", cache_key, _fetch_bytes, ttl=TTL_1_HOUR
+    )
+    return json.loads(raw)
 
 
 async def get_institutional_holdings(ticker: str) -> list[dict]:

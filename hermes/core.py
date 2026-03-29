@@ -13,7 +13,11 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from hermes.config import HermesConfig, configure, get_config
-from hermes.infra.retry import RetryConfig, extract_retry_after, is_rate_limit_error
+from hermes.infra.retry import RetryConfig, is_rate_limit_error, is_transient_error
+
+# Fixed backoff for workflow-level retry (last resort — normal LLM errors are
+# retried transparently at the per-call level in llm_providers._wrap_with_retry).
+_WORKFLOW_BACKOFF: list[float] = [5.0, 15.0, 30.0]
 from hermes.infra.streaming import EventType, StreamEvent
 from hermes.llm_providers import build_llm, detect_provider
 from hermes.registry import Registry
@@ -200,17 +204,17 @@ class Hermes:
                 logger.info("Query complete")
                 return {"response": _extract_text(result) or ""}
             except Exception as exc:
-                if attempt < retry_cfg.max_retries and is_rate_limit_error(exc, provider):
-                    wait = min(
-                        extract_retry_after(exc, provider, retry_cfg),
-                        retry_cfg.max_wait,
-                    )
+                if attempt < retry_cfg.max_retries and (
+                    is_rate_limit_error(exc, provider) or is_transient_error(exc)
+                ):
+                    wait = _WORKFLOW_BACKOFF[min(attempt, len(_WORKFLOW_BACKOFF) - 1)]
                     logger.warning(
-                        "Rate limit [%s] on attempt %d/%d — waiting %.1fs",
+                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s",
                         provider,
                         attempt + 1,
                         retry_cfg.max_retries,
                         wait,
+                        type(exc).__name__,
                     )
                     await asyncio.sleep(wait)
                 else:
@@ -310,17 +314,17 @@ class Hermes:
                 )
                 return
             except Exception as exc:
-                if attempt < retry_cfg.max_retries and is_rate_limit_error(exc, provider):
-                    wait = min(
-                        extract_retry_after(exc, provider, retry_cfg),
-                        retry_cfg.max_wait,
-                    )
+                if attempt < retry_cfg.max_retries and (
+                    is_rate_limit_error(exc, provider) or is_transient_error(exc)
+                ):
+                    wait = _WORKFLOW_BACKOFF[min(attempt, len(_WORKFLOW_BACKOFF) - 1)]
                     logger.warning(
-                        "Rate limit [%s] on attempt %d/%d — waiting %.1fs",
+                        "Workflow error [%s] on attempt %d/%d — retrying in %.0fs: %s",
                         provider,
                         attempt + 1,
                         retry_cfg.max_retries,
                         wait,
+                        type(exc).__name__,
                     )
                     await asyncio.sleep(wait)
                 else:

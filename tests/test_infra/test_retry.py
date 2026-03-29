@@ -13,6 +13,7 @@ from hermes.infra.retry import (
     _parse_go_duration,
     extract_retry_after,
     is_rate_limit_error,
+    is_transient_error,
 )
 
 
@@ -193,6 +194,43 @@ def test_extract_retry_after_fallback_no_headers():
 
 
 # ---------------------------------------------------------------------------
+# is_transient_error
+# ---------------------------------------------------------------------------
+
+
+def test_is_transient_error_timeout():
+    httpx = pytest.importorskip("httpx")
+    exc = httpx.ReadTimeout("timed out", request=MagicMock())
+    assert is_transient_error(exc) is True
+
+
+def test_is_transient_error_connect_error():
+    httpx = pytest.importorskip("httpx")
+    exc = httpx.ConnectError("connection refused", request=MagicMock())
+    assert is_transient_error(exc) is True
+
+
+def test_is_transient_error_500():
+    httpx = pytest.importorskip("httpx")
+    response = MagicMock()
+    response.status_code = 500
+    exc = httpx.HTTPStatusError("server error", request=MagicMock(), response=response)
+    assert is_transient_error(exc) is True
+
+
+def test_is_transient_error_404_not_transient():
+    httpx = pytest.importorskip("httpx")
+    response = MagicMock()
+    response.status_code = 404
+    exc = httpx.HTTPStatusError("not found", request=MagicMock(), response=response)
+    assert is_transient_error(exc) is False
+
+
+def test_is_transient_error_generic_exception():
+    assert is_transient_error(ValueError("nope")) is False
+
+
+# ---------------------------------------------------------------------------
 # Hermes.run() retry integration
 # ---------------------------------------------------------------------------
 
@@ -237,7 +275,6 @@ async def test_run_retries_on_429():
 
     with (
         patch("hermes.core.is_rate_limit_error", side_effect=lambda exc, p: isinstance(exc, _FakeRateLimitError)),
-        patch("hermes.core.extract_retry_after", return_value=0.001),
         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
         patch("hermes.agents.orchestrator.ResearchOrchestrator") as MockOrch,
         patch.object(Hermes, "_ensure_initialized"),

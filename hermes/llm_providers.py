@@ -10,6 +10,8 @@ imported lazily so that users only need to install what they use.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import importlib
 import logging
 from dataclasses import dataclass, field
@@ -286,4 +288,62 @@ def build_llm(provider: str, model: str, config: Any) -> Any:
         "Building LLM: provider=%r, model=%r, class=%s, max_tokens=%d",
         provider, resolved_model, spec.class_name, max_tokens,
     )
-    return cls(**kwargs)
+    llm = cls(**kwargs)
+    return _wrap_with_retry(llm, provider)
+
+
+# ---------------------------------------------------------------------------
+# Per-call LLM retry
+# ---------------------------------------------------------------------------
+
+# Fixed backoff sequence: wait 5s, 15s, 30s between attempts 1→2, 2→3, 3→4.
+_BACKOFF_SECONDS: list[float] = [5.0, 15.0, 30.0]
+
+
+def _wrap_with_retry(llm: Any, provider: str) -> Any:
+    """Wrap LLM async chat/complete methods with per-call exponential backoff.
+
+    Retries transparently on rate-limit and transient errors so the calling
+    workflow never sees the exception and does not restart.
+
+    Args:
+        llm: An instantiated LlamaIndex LLM object.
+        provider: Provider name used for rate-limit error detection.
+
+    Returns:
+        The same *llm* object with its async methods patched in-place.
+    """
+    # Imported here to avoid circular imports (retry imports nothing from here).
+    from hermes.infra.retry import is_rate_limit_error, is_transient_error
+
+    def _make_retried(original: Any, method_name: str) -> Any:
+        @functools.wraps(original)
+        async def _retried(*args: Any, **kwargs: Any) -> Any:
+            for attempt in range(len(_BACKOFF_SECONDS) + 1):
+                try:
+                    return await original(*args, **kwargs)
+                except Exception as exc:
+                    if attempt < len(_BACKOFF_SECONDS) and (
+                        is_rate_limit_error(exc, provider) or is_transient_error(exc)
+                    ):
+                        wait = _BACKOFF_SECONDS[attempt]
+                        logger.warning(
+                            "LLM %s error (attempt %d/%d) — retrying in %.0fs: %s",
+                            method_name,
+                            attempt + 1,
+                            len(_BACKOFF_SECONDS) + 1,
+                            wait,
+                            type(exc).__name__,
+                        )
+                        await asyncio.sleep(wait)
+                    else:
+                        raise
+
+        return _retried
+
+    for method_name in ("achat", "acomplete"):
+        original = getattr(llm, method_name, None)
+        if callable(original):
+            setattr(llm, method_name, _make_retried(original, method_name))
+
+    return llm

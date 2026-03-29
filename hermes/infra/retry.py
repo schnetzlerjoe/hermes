@@ -7,6 +7,7 @@ to handle transient rate-limit errors from any supported LLM provider.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 
@@ -60,6 +61,36 @@ def _parse_go_duration(s: str) -> float:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """Return True if *exc* is a transient network or server error worth retrying.
+
+    Matches HTTP 5xx server errors, connection failures, and timeouts from the
+    httpx client used by LlamaIndex provider SDKs.
+
+    Args:
+        exc: The exception to inspect.
+
+    Returns:
+        True if the exception is likely transient and worth retrying.
+    """
+    try:
+        import httpx
+
+        if isinstance(
+            exc,
+            (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError),
+        ):
+            return True
+        if (
+            isinstance(exc, httpx.HTTPStatusError)
+            and exc.response.status_code in (500, 502, 503, 504)
+        ):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 def is_rate_limit_error(exc: BaseException, provider: str) -> bool:
@@ -162,7 +193,13 @@ def extract_retry_after(
     elif provider == "google":
         # Try JSON body RetryInfo
         try:
-            body = exc.response.json()  # type: ignore[union-attr]
+            json_val = exc.response.json()  # type: ignore[union-attr]
+            # Some Google SDK versions return a coroutine from .json().
+            # Close it to suppress the "coroutine never awaited" warning.
+            if asyncio.iscoroutine(json_val):
+                json_val.close()
+                raise AttributeError("json() is async")
+            body = json_val
             details = body.get("error", {}).get("details", [])
             for detail in details:
                 type_url = detail.get("@type", "")
