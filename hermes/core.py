@@ -195,8 +195,11 @@ class Hermes:
 
         for attempt in range(retry_cfg.max_retries + 1):
             try:
+                extra_agents = (
+                    [cls() for cls in self._extra_agents] if self._extra_agents else None
+                )
                 orchestrator = ResearchOrchestrator()
-                workflow = orchestrator.build_workflow(llm=llm)
+                workflow = orchestrator.build_workflow(llm=llm, extra_agents=extra_agents)
                 handler = workflow.run(
                     user_msg=query, max_iterations=max_iterations, **kwargs
                 )
@@ -256,8 +259,11 @@ class Hermes:
 
         for attempt in range(retry_cfg.max_retries + 1):
             try:
+                extra_agents = (
+                    [cls() for cls in self._extra_agents] if self._extra_agents else None
+                )
                 orchestrator = ResearchOrchestrator()
-                workflow = orchestrator.build_workflow(llm=llm)
+                workflow = orchestrator.build_workflow(llm=llm, extra_agents=extra_agents)
                 handler = workflow.run(
                     user_msg=query, max_iterations=max_iterations, **kwargs
                 )

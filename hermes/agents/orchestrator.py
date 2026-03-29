@@ -177,7 +177,7 @@ class ResearchOrchestrator(HermesAgent):
         """
         return []
 
-    def build_workflow(self, llm: Any | None = None) -> Any:
+    def build_workflow(self, llm: Any | None = None, extra_agents: list[Any] | None = None) -> Any:
         """Build the multi-agent workflow with all specialists.
 
         Creates an :class:`AgentWorkflow` where the orchestrator can hand off
@@ -191,6 +191,10 @@ class ResearchOrchestrator(HermesAgent):
         Args:
             llm: Optional LLM override applied to all agents in the workflow.
                 If ``None``, each agent uses the library-configured default.
+            extra_agents: Optional list of additional :class:`HermesAgent`
+                instances to include in the workflow alongside the built-in
+                specialists.  The orchestrator will be able to hand off to
+                them, and they will hand back to the orchestrator.
 
         Returns:
             A fully wired :class:`AgentWorkflow` instance ready for query
@@ -215,6 +219,10 @@ class ResearchOrchestrator(HermesAgent):
             ModelingAgent(),
             ReportAgent(),
         ]
+
+        if extra_agents:
+            specialist_definitions.extend(extra_agents)
+            logger.debug("Added %d extra agent(s): %s", len(extra_agents), [a.name for a in extra_agents])
 
         handoff_back_suffix = (
             "\n\nIMPORTANT: When you have completed your task, you MUST call the "
