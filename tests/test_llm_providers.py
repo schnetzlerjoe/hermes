@@ -102,7 +102,7 @@ class TestBuildLlm:
             ("ollama", "Ollama", "model"),
             ("huggingface", "HuggingFaceInferenceAPI", "model_name"),
             ("xai", "OpenAILike", "model"),
-            ("deepseek", "OpenAILike", "model"),
+            ("deepseek", "DeepSeek", "model"),
             ("cohere", "Cohere", "model"),
         ],
     )
@@ -151,17 +151,16 @@ class TestBuildLlm:
         assert call_kwargs["api_base"] == "https://api.x.ai/v1"
         assert call_kwargs["api_key"] == "xai-key-123"
 
-    def test_deepseek_passes_api_base(self) -> None:
+    def test_deepseek_passes_api_key(self) -> None:
         config = self._make_config(deepseek_api_key="ds-key-456")
         mock_cls = MagicMock()
         mock_module = MagicMock()
-        mock_module.OpenAILike = mock_cls
+        mock_module.DeepSeek = mock_cls
 
         with patch("hermes.llm_providers.importlib.import_module", return_value=mock_module):
             build_llm("deepseek", "deepseek-chat", config)
 
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs["api_base"] == "https://api.deepseek.com"
         assert call_kwargs["api_key"] == "ds-key-456"
 
     def test_huggingface_uses_model_name_kwarg(self) -> None:

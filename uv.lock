@@ -1926,7 +1926,7 @@ wheels = [
 
 [[package]]
 name = "hermes-financial"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1967,6 +1967,9 @@ all = [
 cohere = [
     { name = "llama-index-llms-cohere" },
 ]
+deepseek = [
+    { name = "llama-index-llms-deepseek" },
+]
 demo = [
     { name = "gradio" },
 ]
@@ -2002,6 +2005,9 @@ pandas = [
 web = [
     { name = "llama-index-readers-web" },
 ]
+xai = [
+    { name = "llama-index-llms-openai-like" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2032,12 +2038,14 @@ requires-dist = [
     { name = "llama-index-embeddings-openai", specifier = ">=0.3.0" },
     { name = "llama-index-llms-anthropic", specifier = ">=0.6.0" },
     { name = "llama-index-llms-cohere", marker = "extra == 'cohere'", specifier = ">=0.4.0" },
+    { name = "llama-index-llms-deepseek", marker = "extra == 'deepseek'", specifier = ">=0.2.0" },
     { name = "llama-index-llms-google-genai", marker = "extra == 'google'", specifier = ">=0.8.7" },
     { name = "llama-index-llms-groq", marker = "extra == 'groq'", specifier = ">=0.3.0" },
     { name = "llama-index-llms-huggingface-api", marker = "extra == 'huggingface'", specifier = ">=0.3.0" },
     { name = "llama-index-llms-mistralai", marker = "extra == 'mistral'", specifier = ">=0.3.0" },
     { name = "llama-index-llms-ollama", marker = "extra == 'ollama'", specifier = ">=0.4.0" },
     { name = "llama-index-llms-openai", specifier = ">=0.3.0" },
+    { name = "llama-index-llms-openai-like", marker = "extra == 'xai'", specifier = ">=0.3.0" },
     { name = "llama-index-readers-web", marker = "extra == 'web'", specifier = ">=0.3.0" },
     { name = "llama-index-vector-stores-chroma", specifier = ">=0.4.0" },
     { name = "llama-parse", marker = "extra == 'llamaparse'", specifier = ">=0.5.0" },
@@ -2053,7 +2061,7 @@ requires-dist = [
     { name = "python-docx", specifier = ">=1.1.0" },
     { name = "ruff", marker = "extra == 'dev'" },
 ]
-provides-extras = ["llamaparse", "web", "pandas", "google", "mistral", "groq", "ollama", "huggingface", "cohere", "demo", "dev", "all"]
+provides-extras = ["llamaparse", "web", "pandas", "google", "mistral", "groq", "ollama", "huggingface", "cohere", "deepseek", "xai", "demo", "dev", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2804,6 +2812,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7e/b9/c76c8559dca138602143db3dda61e0736e82a04edcf2558ba81a5336718d/llama_index_llms_cohere-0.7.1.tar.gz", hash = "sha256:c1cd7d4edc3ffec4b7deaf7374fa28c59c85b7684619ac11ee35575819d41985", size = 12683, upload-time = "2026-01-30T11:15:31.463Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/f4/22497f52eaa827fd28177d85188af17ef60629e195cbd6e551d747e0a9dc/llama_index_llms_cohere-0.7.1-py3-none-any.whl", hash = "sha256:d32d7ab7cb64b7443b059bf8f49947ea616fcc53d6815d5c8ef713143b9f86e2", size = 12978, upload-time = "2026-01-30T11:15:30.573Z" },
+]
+
+[[package]]
+name = "llama-index-llms-deepseek"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "llama-index-llms-openai-like" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2c/c7/2c9a96809055bdb1fa7441af921afc95466c42c95baf23b58e99cee54f77/llama_index_llms_deepseek-0.3.0.tar.gz", hash = "sha256:ca5558c2ce8187121527cc9858894fcc5bdb6a3f31ccb8254381db52b5694773", size = 3724, upload-time = "2026-03-12T20:24:33.584Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/14/cb62de57b052cd3cc447e78af259493099cf004f224ef0222f8574df62c4/llama_index_llms_deepseek-0.3.0-py3-none-any.whl", hash = "sha256:e8f84e69f674be963095ad8f6d313bb4fae0af47c8c4bae68eccf62b6f7a53b2", size = 3575, upload-time = "2026-03-12T20:24:32.902Z" },
 ]
 
 [[package]]

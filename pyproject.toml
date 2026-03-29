@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-financial"
-version = "0.1.10"
+version = "0.1.11"
 description = "Multi-agent financial research framework"
 readme = "README.md"
 license = "MIT"
@@ -50,6 +50,8 @@ groq = ["llama-index-llms-groq>=0.3.0"]
 ollama = ["llama-index-llms-ollama>=0.4.0"]
 huggingface = ["llama-index-llms-huggingface-api>=0.3.0"]
 cohere = ["llama-index-llms-cohere>=0.4.0"]
+deepseek = ["llama-index-llms-deepseek>=0.2.0"]
+xai = ["llama-index-llms-openai-like>=0.3.0"]
 demo = ["gradio>=5.0.0"]
 dev = [
     "pytest",
