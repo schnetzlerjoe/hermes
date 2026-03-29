@@ -101,8 +101,8 @@ class TestBuildLlm:
             ("groq", "Groq", "model"),
             ("ollama", "Ollama", "model"),
             ("huggingface", "HuggingFaceInferenceAPI", "model_name"),
-            ("xai", "OpenAI", "model"),
-            ("deepseek", "OpenAI", "model"),
+            ("xai", "OpenAILike", "model"),
+            ("deepseek", "OpenAILike", "model"),
             ("cohere", "Cohere", "model"),
         ],
     )
@@ -142,7 +142,7 @@ class TestBuildLlm:
         config = self._make_config(xai_api_key="xai-key-123")
         mock_cls = MagicMock()
         mock_module = MagicMock()
-        mock_module.OpenAI = mock_cls
+        mock_module.OpenAILike = mock_cls
 
         with patch("hermes.llm_providers.importlib.import_module", return_value=mock_module):
             build_llm("xai", "grok-2", config)
@@ -155,7 +155,7 @@ class TestBuildLlm:
         config = self._make_config(deepseek_api_key="ds-key-456")
         mock_cls = MagicMock()
         mock_module = MagicMock()
-        mock_module.OpenAI = mock_cls
+        mock_module.OpenAILike = mock_cls
 
         with patch("hermes.llm_providers.importlib.import_module", return_value=mock_module):
             build_llm("deepseek", "deepseek-chat", config)
@@ -183,7 +183,7 @@ class TestBuildLlm:
         config = self._make_config()
         mock_cls = MagicMock()
         mock_module = MagicMock()
-        mock_module.OpenAI = mock_cls
+        mock_module.OpenAILike = mock_cls
 
         with patch("hermes.llm_providers.importlib.import_module", return_value=mock_module):
             build_llm("xai", "grok-2", config)

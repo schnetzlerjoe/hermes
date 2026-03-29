@@ -14,7 +14,7 @@ from hermes.config import HermesConfig, configure
 from hermes.core import Hermes
 from hermes.infra.streaming import EventType, StreamEvent
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 __all__ = [
     "EventType",
