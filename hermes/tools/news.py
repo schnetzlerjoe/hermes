@@ -13,7 +13,8 @@ from html import unescape
 import httpx
 from llama_index.core.tools import FunctionTool
 
-from hermes.tools._base import get_http_client
+from hermes.infra.cache import TTL_1_HOUR
+from hermes.tools._base import cached_request, get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +101,10 @@ async def search_company_news(ticker: str, limit: int = 10) -> list[dict]:
     """
     limit = max(1, min(limit, 50))
     client = get_http_client()
+    cache_key = f"company_news_{ticker.upper()}_{limit}"
 
-    params = {"s": ticker.upper(), "region": "US", "lang": "en-US"}
-
-    try:
+    async def _fetch() -> bytes:
+        params = {"s": ticker.upper(), "region": "US", "lang": "en-US"}
         response = await client.get(
             _YAHOO_RSS_URL,
             params=params,
@@ -116,14 +117,15 @@ async def search_company_news(ticker: str, limit: int = 10) -> list[dict]:
             },
         )
         response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        logger.warning("Yahoo Finance RSS returned %s for %s", exc.response.status_code, ticker)
-        return []
-    except httpx.RequestError as exc:
-        logger.warning("Network error fetching news for %s: %s", ticker, exc)
+        return response.content
+
+    try:
+        raw = await cached_request("news_company", cache_key, _fetch, ttl=TTL_1_HOUR)
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        logger.warning("News fetch failed for %s: %s", ticker, exc)
         return []
 
-    return _parse_rss_items(response.content, limit)
+    return _parse_rss_items(raw, limit)
 
 
 async def search_financial_news(query: str, limit: int = 10) -> list[dict]:
@@ -142,10 +144,10 @@ async def search_financial_news(query: str, limit: int = 10) -> list[dict]:
     """
     limit = max(1, min(limit, 50))
     client = get_http_client()
+    cache_key = f"financial_news_{query}_{limit}"
 
-    params = {"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"}
-
-    try:
+    async def _fetch() -> bytes:
+        params = {"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"}
         response = await client.get(
             _GOOGLE_NEWS_RSS_URL,
             params=params,
@@ -158,17 +160,15 @@ async def search_financial_news(query: str, limit: int = 10) -> list[dict]:
             },
         )
         response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "Google News RSS returned %s for query '%s'",
-            exc.response.status_code, query,
-        )
-        return []
-    except httpx.RequestError as exc:
-        logger.warning("Network error fetching news for '%s': %s", query, exc)
+        return response.content
+
+    try:
+        raw = await cached_request("news_financial", cache_key, _fetch, ttl=TTL_1_HOUR)
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        logger.warning("News fetch failed for query '%s': %s", query, exc)
         return []
 
-    return _parse_rss_items(response.content, limit)
+    return _parse_rss_items(raw, limit)
 
 
 # ---------------------------------------------------------------------------

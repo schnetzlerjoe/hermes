@@ -266,6 +266,22 @@ def build_llm(provider: str, model: str, config: Any) -> Any:
     # matches; see _resolve_llm_model_id.
     kwargs["max_tokens"] = max_tokens
 
+    # Enable Anthropic prompt caching.  cache_idx=-1 instructs LlamaIndex to
+    # add cache_control breakpoints on all messages up to the last one, which
+    # covers the system prompt and all accumulated tool context -- the largest
+    # cost driver in multi-agent workflows.
+    if provider == "anthropic":
+        kwargs["cache_idx"] = -1
+
+    # Enable Google GenAI cached content when configured.  The caller must
+    # pre-create the cache via the Google GenAI SDK (including the system
+    # instruction) and set HERMES_GOOGLE_CACHED_CONTENT to the cache name.
+    if provider == "google":
+        cached_content = getattr(config, "google_cached_content", None)
+        if cached_content:
+            kwargs["cached_content"] = cached_content
+            logger.info("Google cached content enabled: %s", cached_content)
+
     logger.info(
         "Building LLM: provider=%r, model=%r, class=%s, max_tokens=%d",
         provider, resolved_model, spec.class_name, max_tokens,

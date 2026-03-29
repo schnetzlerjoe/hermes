@@ -75,6 +75,18 @@ class HermesConfig(BaseModel):
     output_dir: str = "./output"
     cache_dir: str = "~/.hermes/cache"
 
+    # -- Provider-specific caching --------------------------------------------
+    google_cached_content: str | None = None
+    """Google GenAI cached content name (e.g. ``"cachedContents/abc123"``).
+
+    Create a cache via the Google GenAI SDK with your system instruction and
+    any large documents, then set this to the returned ``cache.name``.  When
+    set, the ``GoogleGenAI`` LLM is initialised with ``cached_content`` so
+    every request reuses the cached tokens instead of re-sending them.
+
+    Set via env var: ``HERMES_GOOGLE_CACHED_CONTENT=cachedContents/abc123``
+    """
+
     # -- Behaviour ------------------------------------------------------------
     verbose: bool = False
     llm_max_retries: int = 3

@@ -266,10 +266,12 @@ class Hermes:
                             text=_extract_text(delta) or "",
                         )
                     elif ev_type == "ToolCall":
+                        tool_kwargs = getattr(ev, "tool_kwargs", None) or {}
                         yield StreamEvent(
                             type=EventType.TOOL_CALL,
                             agent_name=getattr(ev, "agent_name", None),
                             tool_name=getattr(ev, "tool_name", None),
+                            metadata={"tool_kwargs": tool_kwargs},
                         )
                     elif ev_type == "ToolCallResult":
                         raw_output = getattr(ev, "tool_output", None)
