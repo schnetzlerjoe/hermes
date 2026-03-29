@@ -344,6 +344,17 @@ def _wrap_with_retry(llm: Any, provider: str) -> Any:
     for method_name in ("achat", "acomplete"):
         original = getattr(llm, method_name, None)
         if callable(original):
-            setattr(llm, method_name, _make_retried(original, method_name))
+            try:
+                # LlamaIndex LLMs are Pydantic models; setattr raises ValueError
+                # for unknown fields.  object.__setattr__ writes directly to
+                # __dict__ and shadows the class-level method (non-data descriptor)
+                # via Python's normal attribute lookup order.
+                object.__setattr__(llm, method_name, _make_retried(original, method_name))
+            except (AttributeError, TypeError):
+                logger.debug(
+                    "Could not patch %s.%s for retry — skipping",
+                    type(llm).__name__,
+                    method_name,
+                )
 
     return llm
